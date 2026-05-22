@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FarmIntel Enterprise TMA</title>
+    <!-- Tailwind CSS CDN for high-end sleek styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        tgBg: '#17212b',
+                        tgText: '#f5f5f5',
+                        tgHint: '#708499',
+                        tgButton: '#2481cc',
+                        tgCard: '#202b36',
+                        accentTeal: '#14b8a6',
+                        accentAmber: '#f59e0b',
+                        accentRed: '#ef4444'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #17212b;
+            color: #f5f5f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        /* Custom styling to hide scrollbars for an app-like feeling */
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between max-w-md mx-auto relative overflow-x-hidden">
+
+    <!-- ========================================== -->
+    <!-- TOP GLOBAL BAR & ROLE SWITCHER             -->
+    <!-- ========================================== -->
+    <header class="bg-tgCard p-4 border-b border-gray-800 flex justify-between items-center sticky top-0 z-50 shadow-md">
+        <div>
+            <h1 class="font-bold text-lg text-tgButton flex items-center gap-2">
+                🌾 FarmIntel <span class="text-xs bg-gray-800 text-tgHint px-2 py-0.5 rounded-full uppercase tracking-wider font-normal">TMA</span>
+            </h1>
+            <p id="app-user-subtitle" class="text-xs text-tgHint mt-0.5">Role: Loading...</p>
+        </div>
+        
+        <!-- Interactive Role Switcher for local simulation -->
+        <div class="relative">
+            <select id="roleSelector" onchange="switchRole(this.value)" class="bg-tgBg text-xs text-tgText border border-gray-700 rounded px-2 py-1 focus:outline-none focus:border-tgButton cursor-pointer">
+                <option value="WORKER">🥾 Worker View</option>
+                <option value="OWNER_ADMIN">👑 Owner View</option>
+            </select>
+        </div>
+    </header>
+
+    <!-- ========================================== -->
+    <!-- CONTAINER FOR THE SYSTEM VIEWS            -->
+    <!-- ========================================== -->
+    <main id="app-content-view" class="flex-grow p-4 space-y-6 pb-24 overflow-y-auto">
+        <!-- Views will be dynamically injected here via our JavaScript framework engine -->
+    </main>
+
+    <!-- ========================================== -->
+    <!-- FLOATING SYSTEM-WIDE ACTION DIALOGUE       -->
+    <!-- ========================================== -->
+    <div id="toast-notification" class="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-accentTeal text-white font-medium text-sm px-6 py-3 rounded-full shadow-2xl opacity-0 translate-y-4 pointer-events-none transition-all duration-300 z-50 flex items-center gap-2">
+        <span>✅</span> <span id="toast-message">Success!</span>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- INTERACTIVE ENGINE & DATA SCRIPT          -->
+    <!-- ========================================== -->
+    <script>
+        // --- 1. SEED MOCK DATABASE INTO LOCAL STORAGE ---
+        const DEFAULT_DB = {
+            currentRole: "WORKER",
+            thirstingActive: false,
+            thirstSecondsLeft: 4462, // 1 Hour 14 Mins 22 Secs left
+            mortalityCount: 0,
+            leftoverFeed: "",
+            pods: [
+                { id: 3, name: "Pod 3", age: 7, breed: "CHI Cobb 500", birds: 2500, feedType: "Pre-Starter Feed", targetFeed: "45.0 kg", status: "PENDING", meds: "Marek's (Hatchery), Gumboro (Day 11 - Pending)" },
+                { id: 2, name: "Pod 2", age: 21, breed: "Amo Ross 308", birds: 2480, feedType: "Starter Feed", targetFeed: "120.0 kg", status: "LOCKED", meds: "Gumboro (D12) ✓, LaSota (D21) ✓" },
+                { id: 1, name: "Pod 1", age: 35, breed: "CHI Cobb 500", birds: 2450, feedType: "Grower Feed", targetFeed: "210.0 kg", status: "LOCKED", meds: "Gumboro (D11) ✓, LaSota (D21) ✓, Vitamin Boost (D30) ✓" }
+            ]
+        };
+
+        function getDB() {
+            if (!localStorage.getItem("farmintel_db")) {
+                localStorage.setItem("farmintel_db", JSON.stringify(DEFAULT_DB));
+            }
+            return JSON.parse(localStorage.getItem("farmintel_db"));
+        }
+
+        function saveDB(data) {
+            localStorage.setItem("farmintel_db", JSON.stringify(data));
+        }
+
+        // --- 2. THE RENDER ENGINE ---
+        function renderView() {
+            const db = getDB();
+            const container = document.getElementById("app-content-view");
+            const subtitle = document.getElementById("app-user-subtitle");
+            
+            // Set role display headers
+            document.getElementById("roleSelector").value = db.currentRole;
+            subtitle.innerText = db.currentRole === "WORKER" ? "Portal: On-Ground Operator" : "Dashboard: Strategic Commander";
+
+            if (db.currentRole === "WORKER") {
+                // If thirsting mode is engaged, force lock into the countdown screen
+                if (db.thirstingActive) {
+                    container.innerHTML = renderThirstingView(db);
+                    startGlobalTimer();
+                } else {
+                    container.innerHTML = renderWorkerTaskQueue(db);
+                }
+            } else {
+                container.innerHTML = renderOwnerDashboard(db);
+            }
+        }
+
+        // --- 3. UI SCREEN TEMPLATES ---
+
+        // View A: The Worker Operational Task Queue
+        function renderWorkerTaskQueue(db) {
+            let html = `
+                <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-sm font-semibold tracking-wide text-tgHint uppercase">Active Assignment Pipeline</h2>
+                        <span class="text-xs text-accentTeal font-medium flex items-center gap-1">● Biosecurity Mode</span>
+                    </div>
+                    <p class="text-xs text-tgHint">Tasks are strictly linear. Complete younger birds to unlock older pods.</p>
+                </div>
+            `;
+
+            db.pods.forEach(pod => {
+                const isLocked = pod.status === "LOCKED";
+                const isDone = pod.status === "COMPLETED";
+
+                html += `
+                    <div class="bg-tgCard rounded-2xl border ${isLocked ? 'border-gray-800 opacity-60' : isDone ? 'border-accentTeal/30' : 'border-tgButton/40'} p-5 relative shadow-lg overflow-hidden transition-all duration-300">
+                        <!-- Top Header Module -->
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <span class="text-xs font-bold px-2 py-0.5 rounded-md ${isLocked ? 'bg-gray-800 text-tgHint' : isDone ? 'bg-accentTeal/20 text-accentTeal' : 'bg-tgButton/20 text-tgButton'}">${pod.name}</span>
+                                <h3 class="font-bold text-lg mt-1 text-tgText flex items-center gap-2">
+                                    ${pod.birds.toLocaleString()} Birds <span class="text-xs font-normal text-tgHint">(Age: ${pod.age}d)</span>
+                                </h3>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-xs font-medium tracking-wide uppercase ${isLocked ? 'text-tgHint' : isDone ? 'text-accentTeal' : 'text-accentAmber'}">
+                                    ${isLocked ? '🔒 Locked' : isDone ? '✅ Finished' : '⚡ Action Due'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Directive Card Body -->
+                        <div class="space-y-2 border-t border-b border-gray-800/60 my-4 py-3 text-sm">
+                            <div class="flex justify-between"><span class="text-tgHint">Genetic Breed Line:</span> <span class="font-medium">${pod.breed}</span></div>
+                            <div class="flex justify-between"><span class="text-tgHint">Daily Feed Ration:</span> <span class="font-medium text-tgButton">${pod.targetFeed} (${pod.feedType})</span></div>
+                            <div class="flex justify-between items-start"><span class="text-tgHint">Medical Actions:</span> <span class="font-medium text-right text-xs max-w-[180px]">${pod.meds}</span></div>
+                        </div>
+
+                        <!-- Interactive UI input modules (Only available if the pod task is currently active) -->
+                        ${(!isLocked && !isDone) ? `
+                            <div class="space-y-4 mt-2">
+                                <!-- Touch Mortality Log Slider Component -->
+                                <div>
+                                    <div class="flex justify-between text-xs font-medium mb-1">
+                                        <span class="text-tgHint">💀 Record Daily Mortalities</span>
+                                        <span class="text-accentRed font-bold" id="sliderValDisplay">${db.mortalityCount} Dead Birds Found</span>
+                                    </div>
+                                    <input type="range" min="0" max="15" value="${db.mortalityCount}" oninput="updateMortality(this.value)" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-accentRed">
+                                    <p class="text-[11px] text-tgHint mt-1">Adjusted Projected Flock Mass: <span class="text-tgText font-medium">${(pod.birds - db.mortalityCount).toLocaleString()}</span></p>
+                                </div>
+
+                                <!-- Leftover Feed Field Input -->
+                                <div>
+                                    <label class="block text-xs font-medium text-tgHint mb-1">📝 Log Leftover Feed Remnants (kg)</label>
+                                    <input type="number" step="0.1" placeholder="e.g. 1.5" value="${db.leftoverFeed}" oninput="updateLeftover(this.value)" class="w-full bg-tgBg border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-tgButton text-tgText">
+                                </div>
+
+                                <!-- Touch Swipe-to-Confirm Simulator Button Component -->
+                                <div class="pt-2">
+                                    <button onclick="simulateFulfillTask(${pod.id})" class="w-full bg-tgButton active:scale-[0.98] transition-transform text-white text-sm font-bold py-3.5 px-4 rounded-xl shadow-lg flex justify-center items-center gap-2">
+                                        🚀 SWIPE TO SIGN OFF TASK
+                                    </button>
+                                </div>
+                                
+                                <!-- Vaccine Cutoff Trigger Button -->
+                                <button onclick="engageThirstingLock()" class="w-full border border-accentAmber/30 bg-accentAmber/10 hover:bg-accentAmber/20 text-accentAmber text-xs font-semibold py-2.5 px-4 rounded-xl transition-all">
+                                    🧪 Trigger Vaccine Water Cutoff Sequence
+                                </button>
+                            </div>
+                        ` : ''}
+
+                        ${isDone ? `
+                            <div class="bg-accentTeal/10 border border-accentTeal/20 rounded-xl p-3 text-center text-xs text-accentTeal font-medium">
+                                Data synced to database ledger. Next Biosecurity node unlocked.
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+
+            return html;
+        }
+
+        // View B: The Time-Locked Medical Thirsting Interface
+        function renderThirstingView(db) {
+            const mins = Math.floor(db.thirstSecondsLeft / 60);
+            const secs = db.thirstSecondsLeft % 60;
+            const timeString = `01 : ${mins.toString().padStart(2, '0')} : ${secs.toString().padStart(2, '0')}`;
+
+            return `
+                <div class="bg-tgCard rounded-3xl border border-accentAmber/30 p-6 text-center space-y-6 shadow-2xl">
+                    <div>
+                        <span class="text-xs bg-accentAmber/20 text-accentAmber font-bold px-3 py-1 rounded-full uppercase tracking-wider">Medical Isolation Lock</span>
+                        <h2 class="font-bold text-xl mt-3">Vaccination Pre-Thirst Phase</h2>
+                        <p class="text-xs text-tgHint mt-1">Pod 3 • Target Treatment: Gumboro (IBD) Oral Vaccine</p>
+                    </div>
+
+                    <!-- Countdown Numeric Layout Module -->
+                    <div class="bg-tgBg/80 rounded-2xl p-6 border border-gray-800">
+                        <div class="text-xs text-tgHint font-medium tracking-widest uppercase mb-1">Remaining Lockout Time</div>
+                        <div class="font-mono text-3xl font-bold tracking-wider text-accentAmber">${timeString}</div>
+                        <p class="text-xs text-tgHint mt-3">Drinker water distribution lines must remain fully raised or drained across the entire housing perimeter.</p>
+                    </div>
+
+                    <div class="bg-accentRed/10 border border-accentRed/20 rounded-xl p-4 text-left space-y-2">
+                        <h4 class="text-xs font-bold text-accentRed uppercase flex items-center gap-1.5">⚠️ Interlocking Guardrail Engaged</h4>
+                        <p class="text-[11px] text-tgHint leading-relaxed">The vaccine preparation instructions and structural delivery controls are locked to ensure birds get uniformly thirsty. This prevents uneven dosage intake.</p>
+                    </div>
+
+                    <!-- Locked UI Control -->
+                    <button class="w-full bg-gray-800 text-tgHint text-xs font-bold py-3.5 px-4 rounded-xl cursor-not-allowed opacity-50" disabled>
+                        🔒 UNLOCK VACCINE MIXING MIXING STANDARD
+                    </button>
+
+                    <button onclick="cancelThirsting()" class="text-xs text-tgHint underline hover:text-tgText block mx-auto pt-2">
+                        Override & Cancel Sequence
+                    </button>
+                </div>
+            `;
+        }
+
+        // View C: The Strategic Executive Summary Dashboard (Owner / Sub-Admin)
+        function renderOwnerDashboard(db) {
+            let totalBirds = 0;
+            db.pods.forEach(p => totalBirds += p.birds);
+
+            return `
+                <!-- Top High-Level Strategic Card Module -->
+                <div class="space-y-2">
+                    <h2 class="text-sm font-semibold tracking-wide text-tgHint uppercase">Executive Dashboard Summary</h2>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-tgCard p-4 rounded-xl border border-gray-800">
+                            <span class="text-xs text-tgHint block">Live Operations Assets</span>
+                            <span class="text-xl font-bold text-tgText">${totalBirds.toLocaleString()} Birds</span>
+                        </div>
+                        <div class="bg-tgCard p-4 rounded-xl border border-gray-800">
+                            <span class="text-xs text-tgHint block">Breed Leaderboard FCR</span>
+                            <span class="text-xl font-bold text-accentTeal">1.58 <span class="text-xs font-normal text-tgHint">Cobb</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Infrastructure Breakdown Log -->
+                <div class="space-y-3">
+                    <h3 class="text-xs font-semibold tracking-wide text-tgHint uppercase">Active Pod Asset Registry</h3>
+                    
+                    ${db.pods.map(pod => `
+                        <div class="bg-tgCard p-4 rounded-xl border border-gray-850 space-y-3">
+                            <div class="flex justify-between items-center">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-2.5 h-2.5 bg-accentTeal rounded-full"></span>
+                                    <span class="font-bold text-sm">${pod.name} Overview</span>
+                                </div>
+                                <span class="text-[11px] bg-gray-800 text-tgHint font-medium px-2 py-0.5 rounded">${pod.breed}</span>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-2 text-center bg-tgBg/40 p-2 rounded-lg text-xs">
+                                <div>
+                                    <span class="text-tgHint block text-[10px]">Population</span>
+                                    <span class="font-semibold text-tgText">${pod.birds.toLocaleString()}</span>
+                                </div>
+                                <div>
+                                    <span class="text-tgHint block text-[10px]">Current Age</span>
+                                    <span class="font-semibold text-accentAmber">${pod.age} Days</span>
+                                </div>
+                                <div>
+                                    <span class="text-tgHint block text-[10px]">Task Node</span>
+                                    <span class="font-semibold text-tgButton">${pod.status}</span>
+                                </div>
+                            </div>
+
+                            <div class="text-xs space-y-1 pt-1">
+                                <span class="text-tgHint font-medium block">🩺 Documented Medical Track Logs:</span>
+                                <p class="text-tgText bg-tgBg/20 p-2 rounded border border-gray-800 font-mono text-[11px] leading-relaxed">${pod.meds}</p>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // --- 4. BACKEND BUSINESS LOGIC MUTATIONS ---
+        function updateMortality(val) {
+            const db = getDB();
+            db.mortalityCount = parseInt(val);
+            saveDB(db);
+            document.getElementById("sliderValDisplay").innerText = `${val} Dead Birds Found`;
+        }
+
+        function updateLeftover(val) {
+            const db = getDB();
+            db.leftoverFeed = val;
+            saveDB(db);
+        }
+
+        function engageThirstingLock() {
+            const db = getDB();
+            db.thirstingActive = true;
+            saveDB(db);
+            showToast("⏳ Vaccine water cutoff timer engaged! System locked.");
+            renderView();
+        }
+
+        function cancelThirsting() {
+            const db = getDB();
+            db.thirstingActive = false;
+            db.thirstSecondsLeft = 4462; // Reset timer value
+            saveDB(db);
+            showToast("🛑 Sequence cancelled. Safety overrides saved.");
+            renderView();
+        }
+
+        function simulateFulfillTask(podId) {
+            const db = getDB();
+            
+            // Adjust current pod data states
+            const currentPodIndex = db.pods.findIndex(p => p.id === podId);
+            db.pods[currentPodIndex].status = "COMPLETED";
+            db.pods[currentPodIndex].birds -= db.mortalityCount; // Apply mortality reduction
+            
+            // Unlock next biosecurity target node in the queue structure automatically
+            if (currentPodIndex - 1 >= 0) {
+                db.pods[currentPodIndex - 1].status = "PENDING";
+            }
+
+            // Reset worker temporary form elements
+            db.mortalityCount = 0;
+            db.leftoverFeed = "";
+            
+            saveDB(db);
+            showToast("🚀 Task finalized! Data pushed to analytics ledger.");
+            renderView();
+        }
+
+        function switchRole(role) {
+            const db = getDB();
+            db.currentRole = role;
+            saveDB(db);
+            renderView();
+        }
+
+        // --- 5. TECHNICAL UTILITY HELPER ARTIFACTS ---
+        let timerInterval = null;
+        function startGlobalTimer() {
+            if (timerInterval) return;
+            timerInterval = setInterval(() => {
+                const db = getDB();
+                if (db.thirstingActive && db.thirstSecondsLeft > 0) {
+                    db.thirstSecondsLeft--;
+                    saveDB(db);
+                    // Live-update only if the user is looking at the countdown view element
+                    const timerDisplay = document.querySelector(".font-mono");
+                    if (timerDisplay) {
+                        const mins = Math.floor(db.thirstSecondsLeft / 60);
+                        const secs = db.thirstSecondsLeft % 60;
+                        timerDisplay.innerText = `01 : ${mins.toString().padStart(2, '0')} : ${secs.toString().padStart(2, '0')}`;
+                    }
+                } else if (db.thirstSecondsLeft <= 0) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                }
+            }, 1000);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById("toast-notification");
+            document.getElementById("toast-message").innerText = msg;
+            toast.classList.remove("opacity-0", "translate-y-4");
+            toast.classList.add("opacity-100", "translate-y-0");
+            
+            setTimeout(() => {
+                toast.classList.remove("opacity-100", "translate-y-0");
+                toast.classList.add("opacity-0", "translate-y-4");
+            }, 3000);
+        }
+
+        // Start App Framework Engine on Page Load initialization
+        window.onload = renderView;
+    </script>
+</body>
+</html>
